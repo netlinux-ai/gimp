@@ -44,14 +44,14 @@ jobs:
           meson setup babl/_build babl --prefix=/usr -Dwith-docs=false
           ninja -C babl/_build
           sudo ninja -C babl/_build install
-          DESTDIR=/tmp/staging ninja -C babl/_build install
+          sudo DESTDIR=/tmp/staging ninja -C babl/_build install
 
       - name: Build GEGL
         run: |
           meson setup gegl/_build gegl --prefix=/usr -Ddocs=false
           ninja -C gegl/_build
           sudo ninja -C gegl/_build install
-          DESTDIR=/tmp/staging ninja -C gegl/_build install
+          sudo DESTDIR=/tmp/staging ninja -C gegl/_build install
 
       - name: Build GIMP
         run: |
@@ -59,7 +59,7 @@ jobs:
             -Dwebkit-unmaintained=false \
             -Dg-ir-doc=false
           ninja -C gimp/_build
-          DESTDIR=/tmp/staging ninja -C gimp/_build install
+          sudo DESTDIR=/tmp/staging ninja -C gimp/_build install
 
       - name: Determine version
         id: version
