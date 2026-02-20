@@ -56,8 +56,7 @@ jobs:
       - name: Build GIMP
         run: |
           meson setup gimp/_build gimp --prefix=/usr \
-            -Dwebkit-unmaintained=false \
-            -Dg-ir-doc=false
+            -Dwebkit-unmaintained=false
           ninja -C gimp/_build
           sudo DESTDIR=/tmp/staging ninja -C gimp/_build install
 
