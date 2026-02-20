@@ -37,7 +37,7 @@ jobs:
         run: |
           git clone --depth 1 --branch BABL_0_1_122 https://gitlab.gnome.org/GNOME/babl.git
           git clone --depth 1 --branch GEGL_0_4_66 https://gitlab.gnome.org/GNOME/gegl.git
-          git clone --depth 1 --branch GIMP_3_0_8 https://gitlab.gnome.org/GNOME/gimp.git
+          git clone --depth 1 --branch GIMP_3_0_8 --recurse-submodules https://gitlab.gnome.org/GNOME/gimp.git
 
       - name: Build babl
         run: |
