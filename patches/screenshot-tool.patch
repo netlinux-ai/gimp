@@ -1,0 +1,244 @@
+diff --git a/app/tools/gimp-tools.c b/app/tools/gimp-tools.c
+index 8ee8471..9004849 100644
+--- a/app/tools/gimp-tools.c
++++ b/app/tools/gimp-tools.c
+@@ -84,6 +84,7 @@
+ #include "gimprotatetool.h"
+ #include "gimpseamlessclonetool.h"
+ #include "gimpscaletool.h"
++#include "gimpscreenshottool.h"
+ #include "gimpsheartool.h"
+ #include "gimpsmudgetool.h"
+ #include "gimptexttool.h"
+@@ -152,6 +153,7 @@ gimp_tools_init (Gimp *gimp)
+     gimp_color_picker_tool_register,
+     gimp_magnify_tool_register,
+     gimp_measure_tool_register,
++    gimp_screenshot_tool_register,
+ 
+     /*  transform tools  */
+ 
+diff --git a/app/tools/gimpscreenshottool.c b/app/tools/gimpscreenshottool.c
+new file mode 100644
+index 0000000..98b7129
+--- /dev/null
++++ b/app/tools/gimpscreenshottool.c
+@@ -0,0 +1,130 @@
++/* GIMP - The GNU Image Manipulation Program
++ * Copyright (C) 1995 Spencer Kimball and Peter Mattis
++ *
++ * GimpScreenshotTool
++ * Copyright (C) 2025 NetLinux
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "config.h"
++
++#include <gegl.h>
++#include <gtk/gtk.h>
++
++#include "libgimpbase/gimpbase.h"
++#include "libgimpwidgets/gimpwidgets.h"
++
++#include "tools-types.h"
++
++#include "core/gimp.h"
++#include "core/gimptoolinfo.h"
++
++#include "pdb/gimppdb.h"
++#include "pdb/gimpprocedure.h"
++
++#include "display/gimpdisplay.h"
++
++#include "actions/procedure-commands.h"
++
++#include "gimpscreenshottool.h"
++#include "gimptoolcontrol.h"
++
++#include "gimp-intl.h"
++
++
++static void   gimp_screenshot_tool_button_press (GimpTool            *tool,
++                                                  const GimpCoords    *coords,
++                                                  guint32              time,
++                                                  GdkModifierType      state,
++                                                  GimpButtonPressType  press_type,
++                                                  GimpDisplay         *display);
++
++
++G_DEFINE_TYPE (GimpScreenshotTool, gimp_screenshot_tool, GIMP_TYPE_TOOL)
++
++#define parent_class gimp_screenshot_tool_parent_class
++
++
++void
++gimp_screenshot_tool_register (GimpToolRegisterCallback  callback,
++                                gpointer                  data)
++{
++  (* callback) (GIMP_TYPE_SCREENSHOT_TOOL,
++                GIMP_TYPE_TOOL_OPTIONS,
++                NULL,
++                0,
++                "gimp-screenshot-tool",
++                _("Screenshot"),
++                _("Screenshot Tool: Capture a screenshot"),
++                N_("Scr_eenshot"), "<shift>S",
++                NULL, GIMP_HELP_TOOL_ZOOM,
++                GIMP_ICON_TOOL_COLOR_PICKER,
++                data);
++}
++
++static void
++gimp_screenshot_tool_class_init (GimpScreenshotToolClass *klass)
++{
++  GimpToolClass *tool_class = GIMP_TOOL_CLASS (klass);
++
++  tool_class->button_press = gimp_screenshot_tool_button_press;
++}
++
++static void
++gimp_screenshot_tool_init (GimpScreenshotTool *screenshot_tool)
++{
++  GimpTool *tool = GIMP_TOOL (screenshot_tool);
++
++  gimp_tool_control_set_handle_empty_image (tool->control, TRUE);
++  gimp_tool_control_set_wants_click        (tool->control, TRUE);
++  gimp_tool_control_set_snap_to            (tool->control, FALSE);
++
++  gimp_tool_control_set_tool_cursor        (tool->control,
++                                             GIMP_TOOL_CURSOR_CROSSHAIR);
++}
++
++static void
++gimp_screenshot_tool_button_press (GimpTool            *tool,
++                                    const GimpCoords    *coords,
++                                    guint32              time,
++                                    GdkModifierType      state,
++                                    GimpButtonPressType  press_type,
++                                    GimpDisplay         *display)
++{
++  Gimp          *gimp      = tool->tool_info->gimp;
++  GimpProcedure *procedure;
++
++  procedure = gimp_pdb_lookup_procedure (gimp->pdb, "plug-in-screenshot");
++
++  if (procedure)
++    {
++      GimpValueArray *args;
++
++      args = procedure_commands_get_run_mode_arg (procedure);
++
++      procedure_commands_run_procedure_async (procedure, gimp,
++                                              GIMP_PROGRESS (display),
++                                              GIMP_RUN_INTERACTIVE, args,
++                                              display);
++
++      gimp_value_array_unref (args);
++    }
++  else
++    {
++      gimp_message_literal (gimp, G_OBJECT (display),
++                            GIMP_MESSAGE_WARNING,
++                            _("The Screenshot plug-in is not available."));
++    }
++}
+diff --git a/app/tools/gimpscreenshottool.h b/app/tools/gimpscreenshottool.h
+new file mode 100644
+index 0000000..eed07f3
+--- /dev/null
++++ b/app/tools/gimpscreenshottool.h
+@@ -0,0 +1,56 @@
++/* GIMP - The GNU Image Manipulation Program
++ * Copyright (C) 1995 Spencer Kimball and Peter Mattis
++ *
++ * GimpScreenshotTool
++ * Copyright (C) 2025 NetLinux
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef __GIMP_SCREENSHOT_TOOL_H__
++#define __GIMP_SCREENSHOT_TOOL_H__
++
++
++#include "gimptool.h"
++
++
++#define GIMP_TYPE_SCREENSHOT_TOOL            (gimp_screenshot_tool_get_type ())
++#define GIMP_SCREENSHOT_TOOL(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), GIMP_TYPE_SCREENSHOT_TOOL, GimpScreenshotTool))
++#define GIMP_SCREENSHOT_TOOL_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass), GIMP_TYPE_SCREENSHOT_TOOL, GimpScreenshotToolClass))
++#define GIMP_IS_SCREENSHOT_TOOL(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), GIMP_TYPE_SCREENSHOT_TOOL))
++#define GIMP_IS_SCREENSHOT_TOOL_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), GIMP_TYPE_SCREENSHOT_TOOL))
++#define GIMP_SCREENSHOT_TOOL_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), GIMP_TYPE_SCREENSHOT_TOOL, GimpScreenshotToolClass))
++
++
++typedef struct _GimpScreenshotTool      GimpScreenshotTool;
++typedef struct _GimpScreenshotToolClass GimpScreenshotToolClass;
++
++struct _GimpScreenshotTool
++{
++  GimpTool  parent_instance;
++};
++
++struct _GimpScreenshotToolClass
++{
++  GimpToolClass  parent_class;
++};
++
++
++void    gimp_screenshot_tool_register (GimpToolRegisterCallback  callback,
++                                       gpointer                  data);
++
++GType   gimp_screenshot_tool_get_type (void) G_GNUC_CONST;
++
++
++#endif  /*  __GIMP_SCREENSHOT_TOOL_H__  */
+diff --git a/app/tools/meson.build b/app/tools/meson.build
+index 2340e3a..66dc77f 100644
+--- a/app/tools/meson.build
++++ b/app/tools/meson.build
+@@ -102,6 +102,7 @@ libapptools_sources = [
+   'gimprotatetool.c',
+   'gimpsamplepointtool.c',
+   'gimpscaletool.c',
++  'gimpscreenshottool.c',
+   'gimpseamlesscloneoptions.c',
+   'gimpseamlessclonetool.c',
+   'gimpselectionoptions.c',
+diff --git a/etc/toolrc b/etc/toolrc
+index 81bb052..2266bb2 100644
+--- a/etc/toolrc
++++ b/etc/toolrc
+@@ -2,6 +2,9 @@
+ 
+ (file-version 1)
+ 
++(GimpToolInfo "gimp-screenshot-tool"
++    (icon-name "gimp-tool-color-picker")
++    (visible yes))
+ (GimpToolGroup "tool group"
+     (visible yes)
+     (active-tool "gimp-move-tool")

@@ -39,6 +39,11 @@ jobs:
           git clone --depth 1 --branch GEGL_0_4_66 https://gitlab.gnome.org/GNOME/gegl.git
           git clone --depth 1 --branch GIMP_3_0_8 --recurse-submodules https://gitlab.gnome.org/GNOME/gimp.git
 
+      - name: Apply NetLinux patches
+        run: |
+          cd gimp
+          git apply ../patches/screenshot-tool.patch
+
       - name: Build babl
         run: |
           meson setup babl/_build babl --prefix=/usr -Dwith-docs=false
