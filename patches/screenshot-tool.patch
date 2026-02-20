@@ -20,10 +20,10 @@ index 8ee8471..9004849 100644
  
 diff --git a/app/tools/gimpscreenshottool.c b/app/tools/gimpscreenshottool.c
 new file mode 100644
-index 0000000..98b7129
+index 0000000..af1d80f
 --- /dev/null
 +++ b/app/tools/gimpscreenshottool.c
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,131 @@
 +/* GIMP - The GNU Image Manipulation Program
 + * Copyright (C) 1995 Spencer Kimball and Peter Mattis
 + *
@@ -55,6 +55,7 @@ index 0000000..98b7129
 +#include "tools-types.h"
 +
 +#include "core/gimp.h"
++#include "core/gimpprogress.h"
 +#include "core/gimptoolinfo.h"
 +
 +#include "pdb/gimppdb.h"
@@ -88,14 +89,14 @@ index 0000000..98b7129
 +                                gpointer                  data)
 +{
 +  (* callback) (GIMP_TYPE_SCREENSHOT_TOOL,
-+                GIMP_TYPE_TOOL_OPTIONS,
++                G_TYPE_NONE,
 +                NULL,
 +                0,
 +                "gimp-screenshot-tool",
 +                _("Screenshot"),
 +                _("Screenshot Tool: Capture a screenshot"),
 +                N_("Scr_eenshot"), "<shift>S",
-+                NULL, GIMP_HELP_TOOL_ZOOM,
++                NULL, NULL,
 +                GIMP_ICON_TOOL_COLOR_PICKER,
 +                data);
 +}
@@ -118,7 +119,7 @@ index 0000000..98b7129
 +  gimp_tool_control_set_snap_to            (tool->control, FALSE);
 +
 +  gimp_tool_control_set_tool_cursor        (tool->control,
-+                                             GIMP_TOOL_CURSOR_CROSSHAIR);
++                                             GIMP_TOOL_CURSOR_COLOR_PICKER);
 +}
 +
 +static void
