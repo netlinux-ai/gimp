@@ -98,12 +98,31 @@ jobs:
           sudo chmod 666 "$DEB"
           mkdir repack && cd repack
           ar x "../$DEB"
+
+          # Decompress zstd to xz for reprepro compatibility
           for f in *.zst; do
             [ -f "$f" ] || continue
             zstd -d "$f"
             xz "${f%.zst}"
             rm "$f"
           done
+
+          # Inject postinst script to update desktop database
+          mkdir control_dir
+          cd control_dir
+          tar xf ../control.tar.xz
+          cat > postinst << 'POSTINST'
+          #!/bin/sh
+          set -e
+          if [ "$1" = "configure" ] && command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database /usr/share/applications || true
+          fi
+          POSTINST
+          chmod 755 postinst
+          tar cJf ../control.tar.xz .
+          cd ..
+          rm -rf control_dir
+
           rm "../$DEB"
           ar rcs "../$DEB" debian-binary control.tar.xz data.tar.xz
 
