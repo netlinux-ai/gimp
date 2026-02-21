@@ -20,10 +20,10 @@ index 8ee8471..9004849 100644
  
 diff --git a/app/tools/gimpscreenshottool.c b/app/tools/gimpscreenshottool.c
 new file mode 100644
-index 0000000..af1d80f
+index 0000000..318a470
 --- /dev/null
 +++ b/app/tools/gimpscreenshottool.c
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,168 @@
 +/* GIMP - The GNU Image Manipulation Program
 + * Copyright (C) 1995 Spencer Kimball and Peter Mattis
 + *
@@ -55,6 +55,9 @@ index 0000000..af1d80f
 +#include "tools-types.h"
 +
 +#include "core/gimp.h"
++#include "core/gimp-gui.h"
++#include "core/gimpcontext.h"
++#include "core/gimpimage.h"
 +#include "core/gimpprogress.h"
 +#include "core/gimptoolinfo.h"
 +
@@ -63,20 +66,17 @@ index 0000000..af1d80f
 +
 +#include "display/gimpdisplay.h"
 +
-+#include "actions/procedure-commands.h"
-+
 +#include "gimpscreenshottool.h"
 +#include "gimptoolcontrol.h"
 +
 +#include "gimp-intl.h"
 +
 +
-+static void   gimp_screenshot_tool_button_press (GimpTool            *tool,
-+                                                  const GimpCoords    *coords,
-+                                                  guint32              time,
-+                                                  GdkModifierType      state,
-+                                                  GimpButtonPressType  press_type,
-+                                                  GimpDisplay         *display);
++typedef struct
++{
++  Gimp         *gimp;
++  GimpToolInfo *prev_tool_info;
++} ScreenshotIdleData;
 +
 +
 +G_DEFINE_TYPE (GimpScreenshotTool, gimp_screenshot_tool, GIMP_TYPE_TOOL)
@@ -95,18 +95,15 @@ index 0000000..af1d80f
 +                "gimp-screenshot-tool",
 +                _("Screenshot"),
 +                _("Screenshot Tool: Capture a screenshot"),
-+                N_("Scr_eenshot"), "<shift>S",
-+                NULL, NULL,
-+                GIMP_ICON_TOOL_COLOR_PICKER,
++                N_("Scr_eenshot"), NULL,
++                NULL, "gimp-tool-screenshot",
++                GIMP_ICON_TOOL_SCREENSHOT,
 +                data);
 +}
 +
 +static void
 +gimp_screenshot_tool_class_init (GimpScreenshotToolClass *klass)
 +{
-+  GimpToolClass *tool_class = GIMP_TOOL_CLASS (klass);
-+
-+  tool_class->button_press = gimp_screenshot_tool_button_press;
 +}
 +
 +static void
@@ -115,52 +112,92 @@ index 0000000..af1d80f
 +  GimpTool *tool = GIMP_TOOL (screenshot_tool);
 +
 +  gimp_tool_control_set_handle_empty_image (tool->control, TRUE);
-+  gimp_tool_control_set_wants_click        (tool->control, TRUE);
 +  gimp_tool_control_set_snap_to            (tool->control, FALSE);
-+
-+  gimp_tool_control_set_tool_cursor        (tool->control,
-+                                             GIMP_TOOL_CURSOR_COLOR_PICKER);
 +}
 +
-+static void
-+gimp_screenshot_tool_button_press (GimpTool            *tool,
-+                                    const GimpCoords    *coords,
-+                                    guint32              time,
-+                                    GdkModifierType      state,
-+                                    GimpButtonPressType  press_type,
-+                                    GimpDisplay         *display)
++static gboolean
++gimp_screenshot_tool_idle_snap (gpointer user_data)
 +{
-+  Gimp          *gimp      = tool->tool_info->gimp;
-+  GimpProcedure *procedure;
++  ScreenshotIdleData *data        = user_data;
++  Gimp               *gimp        = data->gimp;
++  GError             *error       = NULL;
++  GimpValueArray     *return_vals;
 +
-+  procedure = gimp_pdb_lookup_procedure (gimp->pdb, "plug-in-screenshot");
++  return_vals =
++    gimp_pdb_execute_procedure_by_name (gimp->pdb,
++                                        gimp_get_user_context (gimp),
++                                        NULL, &error,
++                                        "plug-in-screenshot",
++                                        GIMP_TYPE_RUN_MODE, GIMP_RUN_NONINTERACTIVE,
++                                        G_TYPE_STRING,      "screen",
++                                        G_TYPE_INT,         0,
++                                        G_TYPE_INT,         0,
++                                        G_TYPE_INT,         0,
++                                        G_TYPE_INT,         0,
++                                        G_TYPE_BOOLEAN,     FALSE,
++                                        G_TYPE_STRING,      "monitor",
++                                        G_TYPE_NONE);
 +
-+  if (procedure)
++  if (return_vals)
 +    {
-+      GimpValueArray *args;
++      GimpPDBStatusType status;
 +
-+      args = procedure_commands_get_run_mode_arg (procedure);
++      status = g_value_get_enum (gimp_value_array_index (return_vals, 0));
 +
-+      procedure_commands_run_procedure_async (procedure, gimp,
-+                                              GIMP_PROGRESS (display),
-+                                              GIMP_RUN_INTERACTIVE, args,
-+                                              display);
++      if (status == GIMP_PDB_SUCCESS)
++        {
++          GimpImage *image;
 +
-+      gimp_value_array_unref (args);
++          image = g_value_get_object (gimp_value_array_index (return_vals, 1));
++
++          if (image)
++            gimp_create_display (gimp, image, gimp_unit_pixel (), 1.0, NULL);
++        }
++      else if (error)
++        {
++          gimp_message (gimp, NULL, GIMP_MESSAGE_ERROR,
++                        _("Screenshot failed: %s"), error->message);
++          g_error_free (error);
++        }
++
++      gimp_value_array_unref (return_vals);
 +    }
-+  else
++
++  /* Restore the previous tool */
++  if (data->prev_tool_info)
 +    {
-+      gimp_message_literal (gimp, G_OBJECT (display),
-+                            GIMP_MESSAGE_WARNING,
-+                            _("The Screenshot plug-in is not available."));
++      gimp_context_set_tool (gimp_get_user_context (gimp),
++                             data->prev_tool_info);
++      g_object_unref (data->prev_tool_info);
 +    }
++
++  g_slice_free (ScreenshotIdleData, data);
++
++  return G_SOURCE_REMOVE;
++}
++
++/*  Called from tool_manager_tool_changed when this tool is selected.
++ *  Defers the actual screenshot to an idle callback to avoid
++ *  re-entrancy issues in the tool manager.
++ */
++void
++gimp_screenshot_tool_snap (Gimp            *gimp,
++                           GimpToolInfo    *prev_tool_info)
++{
++  ScreenshotIdleData *data;
++
++  data = g_slice_new (ScreenshotIdleData);
++  data->gimp           = gimp;
++  data->prev_tool_info = prev_tool_info ? g_object_ref (prev_tool_info) : NULL;
++
++  g_idle_add (gimp_screenshot_tool_idle_snap, data);
 +}
 diff --git a/app/tools/gimpscreenshottool.h b/app/tools/gimpscreenshottool.h
 new file mode 100644
-index 0000000..eed07f3
+index 0000000..0f50aa0
 --- /dev/null
 +++ b/app/tools/gimpscreenshottool.h
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,59 @@
 +/* GIMP - The GNU Image Manipulation Program
 + * Copyright (C) 1995 Spencer Kimball and Peter Mattis
 + *
@@ -215,6 +252,9 @@ index 0000000..eed07f3
 +
 +GType   gimp_screenshot_tool_get_type (void) G_GNUC_CONST;
 +
++void    gimp_screenshot_tool_snap     (Gimp                     *gimp,
++                                       GimpToolInfo             *prev_tool_info);
++
 +
 +#endif  /*  __GIMP_SCREENSHOT_TOOL_H__  */
 diff --git a/app/tools/meson.build b/app/tools/meson.build
@@ -229,8 +269,47 @@ index 2340e3a..66dc77f 100644
    'gimpseamlesscloneoptions.c',
    'gimpseamlessclonetool.c',
    'gimpselectionoptions.c',
+diff --git a/app/tools/tool_manager.c b/app/tools/tool_manager.c
+index b10f643..96438ff 100644
+--- a/app/tools/tool_manager.c
++++ b/app/tools/tool_manager.c
+@@ -40,6 +40,7 @@
+ #include "widgets/gimpcairo-wilber.h"
+ 
+ #include "gimpgegltool.h"
++#include "gimpscreenshottool.h"
+ #include "gimptool.h"
+ #include "gimptoolcontrol.h"
+ #include "gimptransformgridtool.h"
+@@ -706,7 +707,8 @@ tool_manager_tool_changed (GimpContext     *user_context,
+                            GimpToolInfo    *tool_info,
+                            GimpToolManager *tool_manager)
+ {
+-  GimpTool *new_tool = NULL;
++  GimpTool     *new_tool       = NULL;
++  GimpToolInfo *prev_tool_info = NULL;
+ 
+   if (! tool_info)
+     return;
+@@ -718,6 +720,16 @@ tool_manager_tool_changed (GimpContext     *user_context,
+       return;
+     }
+ 
++  /* Screenshot tool: snap immediately and restore previous tool */
++  if (g_type_is_a (tool_info->tool_type, GIMP_TYPE_SCREENSHOT_TOOL))
++    {
++      if (tool_manager->active_tool)
++        prev_tool_info = tool_manager->active_tool->tool_info;
++
++      gimp_screenshot_tool_snap (user_context->gimp, prev_tool_info);
++      return;
++    }
++
+   /* FIXME: gimp_busy HACK */
+   if (user_context->gimp->busy)
+     {
 diff --git a/etc/toolrc b/etc/toolrc
-index 81bb052..2266bb2 100644
+index 81bb052..32fa987 100644
 --- a/etc/toolrc
 +++ b/etc/toolrc
 @@ -2,6 +2,9 @@
@@ -238,8 +317,20 @@ index 81bb052..2266bb2 100644
  (file-version 1)
  
 +(GimpToolInfo "gimp-screenshot-tool"
-+    (icon-name "gimp-tool-color-picker")
++    (icon-name "gimp-tool-screenshot")
 +    (visible yes))
  (GimpToolGroup "tool group"
      (visible yes)
      (active-tool "gimp-move-tool")
+diff --git a/libgimpwidgets/gimpicons.h b/libgimpwidgets/gimpicons.h
+index 1eccb8b..8c8a0e0 100644
+--- a/libgimpwidgets/gimpicons.h
++++ b/libgimpwidgets/gimpicons.h
+@@ -396,6 +396,7 @@ G_BEGIN_DECLS
+ #define GIMP_ICON_TOOL_RECT_SELECT          "gimp-tool-rect-select"
+ #define GIMP_ICON_TOOL_ROTATE               "gimp-tool-rotate"
+ #define GIMP_ICON_TOOL_SCALE                "gimp-tool-scale"
++#define GIMP_ICON_TOOL_SCREENSHOT           "gimp-tool-screenshot"
+ #define GIMP_ICON_TOOL_SEAMLESS_CLONE       "gimp-tool-seamless-clone"
+ #define GIMP_ICON_TOOL_SHADOWS_HIGHLIGHTS   "gimp-tool-shadows-highlights"
+ #define GIMP_ICON_TOOL_SHEAR                "gimp-tool-shear"

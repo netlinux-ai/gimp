@@ -43,6 +43,8 @@ jobs:
         run: |
           cd gimp
           git apply ../patches/screenshot-tool.patch
+          cd gimp-data
+          git apply ../../patches/screenshot-icons.patch
 
       - name: Build babl
         run: |
