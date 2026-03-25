@@ -20,10 +20,10 @@ index 8ee8471..9004849 100644
  
 diff --git a/app/tools/gimpscreenshottool.c b/app/tools/gimpscreenshottool.c
 new file mode 100644
-index 0000000..318a470
+index 0000000..0000001
 --- /dev/null
 +++ b/app/tools/gimpscreenshottool.c
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,201 @@
 +/* GIMP - The GNU Image Manipulation Program
 + * Copyright (C) 1995 Spencer Kimball and Peter Mattis
 + *
@@ -122,6 +122,31 @@ index 0000000..318a470
 +  Gimp               *gimp        = data->gimp;
 +  GError             *error       = NULL;
 +  GimpValueArray     *return_vals;
++  GList              *toplevels;
++  GList              *visible_windows = NULL;
++  GList              *iter;
++
++  /* Hide all visible GIMP windows so they don't appear in the screenshot */
++  toplevels = gtk_window_list_toplevels ();
++  for (iter = toplevels; iter; iter = iter->next)
++    {
++      GtkWindow *win = GTK_WINDOW (iter->data);
++
++      if (gtk_widget_get_visible (GTK_WIDGET (win)))
++        {
++          visible_windows = g_list_prepend (visible_windows,
++                                            g_object_ref (win));
++          gtk_widget_hide (GTK_WIDGET (win));
++        }
++    }
++  g_list_free (toplevels);
++
++  /* Flush events so the windows actually disappear from screen */
++  while (gtk_events_pending ())
++    gtk_main_iteration ();
++
++  /* Brief pause to let the compositor finish removing the windows */
++  g_usleep (200000);  /* 200 ms */
 +
 +  return_vals =
 +    gimp_pdb_execute_procedure_by_name (gimp->pdb,
@@ -162,6 +187,14 @@ index 0000000..318a470
 +
 +      gimp_value_array_unref (return_vals);
 +    }
++
++  /* Re-show all windows that were visible before the screenshot */
++  for (iter = visible_windows; iter; iter = iter->next)
++    {
++      gtk_widget_show (GTK_WIDGET (iter->data));
++      g_object_unref (iter->data);
++    }
++  g_list_free (visible_windows);
 +
 +  /* Restore the previous tool */
 +  if (data->prev_tool_info)
