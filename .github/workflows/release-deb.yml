@@ -1,201 +1,28 @@
-name: Build .deb package (dual-suite)
+name: Trigger dev build
+# All build/test/publish happens on dev (the netlinux nightly host).
+# This GHA workflow is a thin trigger: on every push, sign and POST the
+# commit info to the apt-server webhook, which SSHes to dev and starts
+# a single-repo build for both bookworm and resolute suites.
 
 on:
   push:
-    branches: [main]
-
-permissions:
-  contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: bookworm
-            container: debian:bookworm
-          - target: resolute
-            container: ubuntu:26.04
-    runs-on: ubuntu-24.04
-    container:
-      image: ${{ matrix.container }}
-
+  trigger:
+    runs-on: ubuntu-latest
     steps:
-      - name: Bootstrap container
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git xz-utils zstd \
-            build-essential dpkg-dev sudo
-
-      - uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
-          apt-get update
-          apt-get build-dep -y gimp
-          apt-get install -y \
-            checkinstall meson ninja-build \
-            libgtk-3-dev libglib2.0-dev libcairo2-dev libpango1.0-dev \
-            libgdk-pixbuf-2.0-dev libharfbuzz-dev libfontconfig-dev \
-            libfreetype-dev liblcms2-dev libmypaint-dev mypaint-brushes \
-            librsvg2-dev libgexiv2-dev libjson-glib-dev libappstream-dev \
-            libpoppler-glib-dev libheif-dev libjxl-dev libwebp-dev \
-            libtiff-dev libjpeg-dev libpng-dev libopenexr-dev \
-            libopenjp2-7-dev libwmf-dev libarchive-dev libexiv2-dev \
-            libbz2-dev liblzma-dev libxmu-dev libxpm-dev \
-            gobject-introspection libgirepository1.0-dev \
-            gettext xsltproc appstream \
-            python3-gi
-
-
-      - name: Clone sources
-        run: |
-          git clone --depth 1 --branch BABL_0_1_122 https://gitlab.gnome.org/GNOME/babl.git
-          git clone --depth 1 --branch GEGL_0_4_66 https://gitlab.gnome.org/GNOME/gegl.git
-          git clone --depth 1 --branch GIMP_3_0_8 --recurse-submodules https://gitlab.gnome.org/GNOME/gimp.git
-
-
-      - name: Apply NetLinux patches
-        run: |
-          cd gimp
-          git apply ../patches/screenshot-tool.patch
-          cd gimp-data
-          git apply ../../patches/screenshot-icons.patch
-
-
-      - name: Build babl
-        run: |
-          meson setup babl/_build babl --prefix=/usr -Dwith-docs=false
-          ninja -C babl/_build
-          sudo ninja -C babl/_build install
-          sudo DESTDIR=/tmp/staging ninja -C babl/_build install
-
-
-      - name: Build GEGL
-        run: |
-          meson setup gegl/_build gegl --prefix=/usr -Ddocs=false
-          ninja -C gegl/_build
-          sudo ninja -C gegl/_build install
-          sudo DESTDIR=/tmp/staging ninja -C gegl/_build install
-
-
-      - name: Build GIMP
-        run: |
-          meson setup gimp/_build gimp --prefix=/usr \
-            -Dwebkit-unmaintained=false
-          ninja -C gimp/_build
-          sudo DESTDIR=/tmp/staging ninja -C gimp/_build install
-
-
-      - name: Determine version
-        id: version
-        run: |
-          base=$(meson introspect gimp/_build --projectinfo \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['version'])")
-          rev=${{ github.run_number }}
-          echo "version=${base}-${rev}netlinux1~${{ matrix.target }}1" >> "$GITHUB_OUTPUT"
-          echo "tag=v${base}-${rev}netlinux1~${{ matrix.target }}1" >> "$GITHUB_OUTPUT"
-
-
-      - name: Package with checkinstall
-        run: |
-          echo "GIMP 3.0 image editor with screenshot tool, bundled babl/GEGL (GTK3, Wayland, JPEG XL)" > description-pak
-          checkinstall --default \
-            --pkgname=gimp \
-            --pkgversion="${{ steps.version.outputs.version }}" \
-            --maintainer="graham@netlinux.co.uk" \
-            --requires="libgtk-3-0t64,libcairo2,libpango-1.0-0,libgdk-pixbuf-2.0-0,\
-          liblcms2-2,libmypaint-1.5-1,mypaint-brushes,librsvg2-2,libgexiv2-2,\
-          libjson-glib-1.0-0,libpoppler-glib8t64,libheif1,libjxl0.7,libwebp7,\
-          libtiff6,libjpeg8,libpng16-16t64,libopenexr-3-1-30,libopenjp2-7,\
-          libwmf-0.2-7,libarchive13,libexiv2-27,shared-mime-info,iso-codes" \
-            --pakdir=. \
-            --install=no \
-            --fstrans=no \
-            bash -c 'cp -a /tmp/staging/usr/* /usr/'
-
-
-      - name: Repack .deb for reprepro compatibility
-        run: |
-          DEB=$(ls gimp_*.deb)
-          chmod 666 "$DEB"
-          mkdir repack && cd repack
-          ar x "../$DEB"
-
-          # Decompress zstd to xz for reprepro compatibility
-          for f in *.zst; do
-            [ -f "$f" ] || continue
-            zstd -d "$f"
-            xz "${f%.zst}"
-            rm "$f"
-          done
-
-          # Inject postinst script to update desktop database
-          mkdir control_dir
-          cd control_dir
-          tar xf ../control.tar.xz
-          cat > postinst << 'POSTINST'
-          #!/bin/sh
-          set -e
-          if [ "$1" = "configure" ] && command -v update-desktop-database >/dev/null 2>&1; then
-            update-desktop-database /usr/share/applications || true
-          fi
-          POSTINST
-          chmod 755 postinst
-          tar cJf ../control.tar.xz .
-          cd ..
-          rm -rf control_dir
-
-          rm "../$DEB"
-          ar rcs "../$DEB" debian-binary control.tar.xz data.tar.xz
-
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: deb-${{ matrix.target }}
-          path: |
-            **/*.deb
-          if-no-files-found: error
-
-  release:
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Compute tag
-        id: tag
-        run: echo "tag=v${{ github.run_number }}-dualsuite" >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: Build ${{ github.run_number }} (bookworm + resolute)
-          body: |
-            Dual-suite build from commit ${{ github.sha }}.
-            Both ~bookworm1 and ~resolute1 .debs are attached.
-          files: artifacts/**/*.deb
-          fail_on_unmatched_files: true
+      - name: Notify dev build pipeline
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Notify package repository
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: |
-          sleep 5
-          PAYLOAD='{"repo":"netlinux-ai/gimp","tag":"${{ steps.tag.outputs.tag }}"}'
-          SIGNATURE=$(echo -n "$PAYLOAD" \
-            | openssl dgst -sha256 -hmac "${{ secrets.WEBHOOK_SECRET }}" -binary \
-            | xxd -p -c 256)
-          curl -sf -X POST \
+          PAYLOAD=$(printf '{"repo":"%s","sha":"%s","ref":"%s"}' "$REPO" "$SHA" "$REF")
+          SIGNATURE=$(printf %s "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" -binary | xxd -p -c 256)
+          echo "Dispatching build for $REPO @ ${SHA:0:8} ($REF)"
+          curl -sSf -X POST \
             -H "Content-Type: application/json" \
             -H "X-Webhook-Signature: sha256=${SIGNATURE}" \
             -d "$PAYLOAD" \
-            https://packages.netlinux.co.uk/webhook/update-repo
+            https://packages.netlinux.co.uk/webhook/build
